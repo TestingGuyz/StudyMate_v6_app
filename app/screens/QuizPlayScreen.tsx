@@ -14,6 +14,7 @@ import { writeQuery } from '../../lib/neo4j';
 import { searchStudyReferences, formatSnippetsForPrompt } from '../../lib/webSearch';
 import { ScoreCircle } from '../../components/ScoreCircle';
 import { v4 as uuidv4 } from 'uuid';
+import { progressMission } from '../../lib/missions';
 
 interface QuizQuestion {
   question: string;
@@ -99,8 +100,9 @@ ${refBlock || '(none)'}
 Generate ${params.count || 5} MCQ questions for ${params.board} Class ${params.classNum} on ${params.chapter} in ${params.subject}.
 Difficulty: ${params.difficulty || 'Medium'}.${patternHint}
 
-Return ONLY a valid JSON array. No markdown. No extra text. Just the array:
-[{"question":"string","options":["a","b","c","d"],"correct":"string","explanation":"string"}]`;
+Return ONLY a valid JSON array. No markdown. No extra text. Just the array. 
+The 'correct' field MUST match one of the strings in the 'options' array EXACTLY.
+[{"question":"string","options":["Choice 1","Choice 2","Choice 3","Choice 4"],"correct":"Choice 1","explanation":"string"}]`;
 
       const response = await callGroq(
         [{ role: 'system', content: 'You are a quiz generator. Return only valid JSON.' }, { role: 'user', content: prompt }],
@@ -134,8 +136,14 @@ Return ONLY a valid JSON array. No markdown. No extra text. Just the array:
     setAnswered(true);
     if (timerRef.current) clearInterval(timerRef.current);
 
-    const isCorrect = option === questions[current]?.correct;
-    if (isCorrect) setScore(prev => prev + 1);
+    const isCorrect = (opt: string, correct: string) => {
+      if (!opt || !correct) return false;
+      const clean = (s: string) => s.toLowerCase().replace(/^[a-d][\s).:-]+/, '').trim();
+      return clean(opt) === clean(correct) || opt === correct;
+    };
+
+    const isRight = isCorrect(option, questions[current]?.correct);
+    if (isRight) setScore(prev => prev + 1);
     else if (option) {
       setWrongAnswers(prev => [...prev, { q: questions[current], selected: option }]);
     }
@@ -175,6 +183,10 @@ Return ONLY a valid JSON array. No markdown. No extra text. Just the array:
           timeTaken: totalTime,
         }
       );
+      
+      // Hook gamification
+      progressMission(studentId, 'quiz_completed', 1, params.subject).catch(err => console.error('Gamification mission update failed:', err));
+      
     } catch (err) {
       console.error('Failed to save quiz:', err);
     }
@@ -280,14 +292,19 @@ Return ONLY a valid JSON array. No markdown. No extra text. Just the array:
         <Text style={[styles.questionText, { color: colors.text }]}>{q.question}</Text>
 
         {q.options.map((opt, i) => {
-          const isCorrect = opt === q.correct;
+          const isCorrect = (option: string, correct: string) => {
+            if (!option || !correct) return false;
+            const clean = (s: string) => s.toLowerCase().replace(/^[a-d][\s).:-]+/, '').trim();
+            return clean(option) === clean(correct) || option === correct;
+          };
+          const isOptCorrect = isCorrect(opt, q.correct);
           const isSelected = opt === selected;
           let optBg = colors.surface;
           let optBorder = colors.border;
           let optTextColor = colors.text;
 
           if (answered) {
-            if (isCorrect) { optBg = '#179C6E18'; optBorder = '#179C6E'; optTextColor = '#179C6E'; }
+            if (isOptCorrect) { optBg = '#179C6E18'; optBorder = '#179C6E'; optTextColor = '#179C6E'; }
             else if (isSelected) { optBg = '#EF444418'; optBorder = '#EF4444'; optTextColor = '#EF4444'; }
           } else if (isSelected) {
             optBg = colors.primaryContainer; optBorder = colors.primary;
@@ -301,8 +318,8 @@ Return ONLY a valid JSON array. No markdown. No extra text. Just the array:
               disabled={answered}
             >
               <Text style={[styles.optionText, { color: optTextColor }]}>{opt}</Text>
-              {answered && isCorrect && <Ionicons name="checkmark-circle" size={20} color="#179C6E" />}
-              {answered && isSelected && !isCorrect && <Ionicons name="close-circle" size={20} color="#EF4444" />}
+              {answered && isOptCorrect && <Ionicons name="checkmark-circle" size={20} color="#179C6E" />}
+              {answered && isSelected && !isOptCorrect && <Ionicons name="close-circle" size={20} color="#EF4444" />}
             </TouchableOpacity>
           );
         })}

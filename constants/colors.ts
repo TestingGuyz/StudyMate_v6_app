@@ -155,6 +155,16 @@ export const PerformanceDotColors = {
   unattempted: '#C8C5D0', // not attempted
 };
 
+// Typography scale (8px grid)
+export const Typography = {
+  hero: { fontSize: 30, fontWeight: '800' as const, letterSpacing: -0.8, lineHeight: 36 },
+  title: { fontSize: 22, fontWeight: '700' as const, letterSpacing: -0.4, lineHeight: 28 },
+  subtitle: { fontSize: 14, fontWeight: '500' as const, letterSpacing: 0.1, lineHeight: 20 },
+  body: { fontSize: 15, fontWeight: '400' as const, letterSpacing: 0, lineHeight: 22 },
+  caption: { fontSize: 11, fontWeight: '600' as const, letterSpacing: 1.2, lineHeight: 14 },
+  label: { fontSize: 12, fontWeight: '600' as const, letterSpacing: 0.3, lineHeight: 16 },
+};
+
 // Premium UI tokens
 export const PremiumTokens = {
   light: {

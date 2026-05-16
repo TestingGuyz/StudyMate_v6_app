@@ -8,9 +8,13 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme, useAuth } from '../../lib/context';
+import { useT } from '../../lib/translations';
+import { usePremium } from '../../components/ui/premium';
 import { getStudentProfile, StudentProfile } from '../../lib/adaptiveEngine';
 import { readQuery } from '../../lib/neo4j';
 import { computeStressVerdict } from '../../lib/stressDetection';
+import { getGamificationStats, GamificationStats } from '../../lib/gamification';
+import { getActiveMissions, Mission } from '../../lib/missions';
 import { MoodCheckIn } from '../../components/MoodCheckIn';
 import { AdaptiveNudgeCard } from '../../components/AdaptiveNudgeCard';
 import { CrisisCard } from '../../components/CrisisCard';
@@ -18,11 +22,11 @@ import { ScreenSkeleton } from '../../components/LoadingSkeleton';
 import { WeeklyTimetableCard } from '../../components/WeeklyTimetableCard';
 
 const { width: SW } = Dimensions.get('window');
-const DEFAULT_FOCUS_HINT = 'Short, focused sessions beat marathon cramming — pick one weak topic today.';
-
 export default function HomeScreen() {
   const { colors, isDark } = useTheme();
   const { studentId } = useAuth();
+  const tr = useT();
+  const premium = usePremium();
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,9 +36,11 @@ export default function HomeScreen() {
   const [hasBaseline, setHasBaseline] = useState(true);
   const [baselineViewed, setBaselineViewed] = useState(false);
   const [weekStats, setWeekStats] = useState({ quizzes: 0, avgScore: 0, studyMins: 0 });
-  const [focusHint, setFocusHint] = useState(DEFAULT_FOCUS_HINT);
+  const [focusHintKey, setFocusHintKey] = useState<'focus_hint_default' | 'focus_hint_stress' | 'focus_hint_steady'>('focus_hint_default');
   const [nextExam, setNextExam] = useState<{ name: string; days: number } | null>(null);
   const [timetableReload, setTimetableReload] = useState(0);
+  const [gStats, setGStats] = useState<GamificationStats | null>(null);
+  const [missions, setMissions] = useState<Mission[]>([]);
 
   const fetchData = useCallback(async () => {
     if (!studentId) return;
@@ -71,10 +77,10 @@ export default function HomeScreen() {
       const avgS = stressRow[0]?.get('a');
       if (avgS != null && !Number.isNaN(Number(avgS))) {
         const v = Number(avgS);
-        if (v > 3.6) setFocusHint('Recent mood checks suggest higher strain — use shorter blocks and schedule breaks.');
-        else if (v < 2.2) setFocusHint('You have been steady lately — a good stretch to tackle a weaker chapter.');
-        else setFocusHint(DEFAULT_FOCUS_HINT);
-      } else setFocusHint(DEFAULT_FOCUS_HINT);
+        if (v > 3.6) setFocusHintKey('focus_hint_stress');
+        else if (v < 2.2) setFocusHintKey('focus_hint_steady');
+        else setFocusHintKey('focus_hint_default');
+      } else setFocusHintKey('focus_hint_default');
 
       const examRec = await readQuery(
         `MATCH (s:Student {id: $studentId})-[:HAS_EXAM]->(e:Exam)
@@ -144,6 +150,12 @@ export default function HomeScreen() {
         avgScore: Math.round(avgScore * 100) || 0,
         studyMins: studySessions[0]?.get('total') || 0,
       });
+
+      const st = await getGamificationStats(studentId);
+      setGStats(st);
+      const activeMs = await getActiveMissions(studentId);
+      setMissions(activeMs);
+      
     } catch (err) {
       console.error('Home data fetch error:', err);
     } finally {
@@ -162,9 +174,9 @@ export default function HomeScreen() {
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
+    if (hour < 12) return tr('good_morning');
+    if (hour < 17) return tr('good_afternoon');
+    return tr('good_evening');
   };
 
   const handleViewResults = async () => {
@@ -182,18 +194,18 @@ export default function HomeScreen() {
   if (loading) return <ScreenSkeleton />;
 
   const FEATURES = [
-    { icon: 'chatbubble-ellipses-outline', label: 'Ask AI', route: '/screens/AskAIScreen', color: '#818CF8' },
-    { icon: 'document-text-outline', label: 'Grade Answer', route: '/screens/AnswerGraderScreen', color: '#60A5FA' },
-    { icon: 'bulb-outline', label: 'Concepts', route: '/screens/ConceptExplainerScreen', color: '#FBBF24' },
-    { icon: 'newspaper-outline', label: 'Mock Exam', route: '/screens/MockExamScreen', color: '#F472B6' },
-    { icon: 'today-outline', label: 'Schedule', route: '/screens/StudyScheduleScreen', color: '#34D399' },
-    { icon: 'calendar-outline', label: 'Calendar', route: '/screens/CalendarScreen', color: '#10B981' },
-    { icon: 'albums-outline', label: 'Review Deck', route: '/screens/ReviewDeckScreen', color: '#FB923C' },
-    { icon: 'people-outline', label: 'Parent View', route: '/screens/ParentPortalScreen', color: '#C084FC' },
-    { icon: 'mic-outline', label: 'Voice AI', route: '/screens/VoiceModeScreen', color: '#38BDF8' },
-    { icon: 'heart-outline', label: 'Wellness', route: '/screens/MoodHistoryScreen', color: '#F87171' },
-    { icon: 'timer-outline', label: 'Focus Timer', route: '/screens/FocusTimerScreen', color: '#2DD4BF' },
-    { icon: 'reader-outline', label: 'Notes', route: '/screens/StudyNotesScreen', color: '#A78BFA' },
+    { icon: 'chatbubble-ellipses-outline', labelKey: 'feature_ask_ai', route: '/screens/AskAIScreen', color: '#818CF8' },
+    { icon: 'document-text-outline', labelKey: 'feature_grade', route: '/screens/AnswerGraderScreen', color: '#60A5FA' },
+    { icon: 'bulb-outline', labelKey: 'feature_concepts', route: '/screens/ConceptExplainerScreen', color: '#FBBF24' },
+    { icon: 'newspaper-outline', labelKey: 'feature_mock', route: '/screens/MockExamScreen', color: '#F472B6' },
+    { icon: 'today-outline', labelKey: 'feature_schedule', route: '/screens/StudyScheduleScreen', color: '#34D399' },
+    { icon: 'calendar-outline', labelKey: 'feature_calendar', route: '/screens/CalendarScreen', color: '#10B981' },
+    { icon: 'albums-outline', labelKey: 'feature_review', route: '/screens/ReviewDeckScreen', color: '#FB923C' },
+    { icon: 'people-outline', labelKey: 'feature_parent', route: '/screens/ParentPortalScreen', color: '#C084FC' },
+    { icon: 'mic-outline', labelKey: 'feature_voice', route: '/screens/VoiceModeScreen', color: '#38BDF8' },
+    { icon: 'heart-outline', labelKey: 'feature_wellness', route: '/screens/MoodHistoryScreen', color: '#F87171' },
+    { icon: 'timer-outline', labelKey: 'feature_focus', route: '/screens/FocusTimerScreen', color: '#2DD4BF' },
+    { icon: 'reader-outline', labelKey: 'feature_notes', route: '/screens/StudyNotesScreen', color: '#A78BFA' },
   ];
 
   return (
@@ -208,37 +220,77 @@ export default function HomeScreen() {
         colors={isDark ? ['#1E1B4B', '#070235'] : ['#E0E7FF', '#F9F9FF']}
         style={st.hero}
       >
+        <View style={{flexDirection: 'row', alignItems: 'center'}}>
         <View style={[st.streakPill, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
           <Ionicons name="flame" size={14} color={isDark ? '#FEA619' : '#F59E0B'} />
-          <Text style={[st.streakText, { color: isDark ? '#FFF' : '#000' }]}>{profile?.streak || 0}-DAY STREAK</Text>
+          <Text style={[st.streakText, { color: isDark ? '#FFF' : '#000' }]}>{gStats?.streak || 0} {tr('day_streak')}</Text>
+        </View>
+        <View style={[st.streakPill, { backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', marginLeft: 8 }]}>
+          <Ionicons name="star" size={14} color={isDark ? '#34D399' : '#10B981'} />
+          <Text style={[st.streakText, { color: isDark ? '#FFF' : '#000' }]}>{tr('level')} {gStats?.level || 1} • {gStats?.xp || 0} {tr('xp')}</Text>
+        </View>
         </View>
         <Text style={[st.greeting, { color: isDark ? '#FFF' : '#181445' }]}>
-          {getGreeting()}, {profile?.name?.split(' ')[0] || 'Student'}
+          {getGreeting()}, {profile?.name?.split(' ')[0] || tr('student')}
         </Text>
         <Text style={[st.greetingSub, { color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(24,20,69,0.7)' }]}>
-          {focusHint}
+          {tr(focusHintKey)}
         </Text>
       </LinearGradient>
 
       {/* Stats Card */}
       <View style={{ marginTop: -20, paddingHorizontal: 16 }}>
-        <View style={[st.statsRow, { backgroundColor: colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.1, shadowRadius: 24, elevation: 10, borderRadius: 20, padding: 20 }]}>
+        <View style={[st.statsRow, {
+          backgroundColor: premium.glassBg,
+          borderColor: premium.glassBorder,
+          borderWidth: 1,
+          shadowColor: premium.cardShadowColor,
+          shadowOffset: premium.cardShadowOffset,
+          shadowOpacity: premium.cardShadowOpacity,
+          shadowRadius: premium.cardShadowRadius,
+          elevation: 10,
+          borderRadius: 16,
+          padding: 20,
+        }]}
+        >
           <View style={st.statCard}>
             <Text style={[st.statValue, { color: colors.text }]}>{Math.floor(weekStats.studyMins / 60)}<Text style={st.statUnit}>h </Text>{weekStats.studyMins % 60}<Text style={st.statUnit}>m</Text></Text>
-            <Text style={[st.statLabel, { color: colors.textTertiary }]}>Time</Text>
+            <Text style={[st.statLabel, { color: colors.textTertiary }]}>{tr('stat_time')}</Text>
           </View>
           <View style={[st.statDivider, { backgroundColor: colors.border }]} />
           <View style={st.statCard}>
             <Text style={[st.statValue, { color: colors.text }]}>{weekStats.avgScore}<Text style={st.statUnit}>%</Text></Text>
-            <Text style={[st.statLabel, { color: colors.textTertiary }]}>Avg Score</Text>
+            <Text style={[st.statLabel, { color: colors.textTertiary }]}>{tr('stat_avg_score')}</Text>
           </View>
           <View style={[st.statDivider, { backgroundColor: colors.border }]} />
           <View style={st.statCard}>
             <Text style={[st.statValue, { color: colors.text }]}>{weekStats.quizzes}</Text>
-            <Text style={[st.statLabel, { color: colors.textTertiary }]}>Quizzes</Text>
+            <Text style={[st.statLabel, { color: colors.textTertiary }]}>{tr('stat_quizzes')}</Text>
           </View>
         </View>
       </View>
+
+      {/* Missions */}
+      {missions.length > 0 && (
+        <View style={{ paddingHorizontal: 16, marginTop: 24 }}>
+          <Text style={[st.sectionTitle, { color: colors.text, paddingHorizontal: 0 }]}>{tr('todays_missions')}</Text>
+          {missions.map(m => (
+            <View key={m.id} style={{ backgroundColor: colors.surfaceContainer, padding: 16, borderRadius: 16, marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{m.title}</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.primary }}>+{m.rewardXP} XP</Text>
+              </View>
+              <Text style={{ fontSize: 14, color: colors.textSecondary, marginTop: 4 }}>{m.description}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 12 }}>
+                <View style={{ flex: 1, height: 6, backgroundColor: colors.border, borderRadius: 3 }}>
+                  <View style={{ height: 6, backgroundColor: colors.primary, borderRadius: 3, width: `${Math.min((m.progress/m.target)*100, 100)}%` as any }} />
+                </View>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: colors.textSecondary }}>{m.progress} / {m.target}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Timetable */}
       {studentId ? <WeeklyTimetableCard studentId={studentId} reloadTick={timetableReload} /> : null}
@@ -246,10 +298,10 @@ export default function HomeScreen() {
       {/* Exam Banner */}
       {nextExam ? (
         <View style={{ marginHorizontal: 16, marginTop: 16, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: isDark ? 'rgba(254,166,25,0.35)' : '#FDE68A', backgroundColor: isDark ? 'rgba(254,166,25,0.08)' : '#FFFBEB' }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: '#B45309', letterSpacing: 0.5 }}>UPCOMING EXAM</Text>
+          <Text style={{ fontSize: 12, fontWeight: '700', color: '#B45309', letterSpacing: 0.5 }}>{tr('upcoming_exam')}</Text>
           <Text style={{ fontSize: 17, fontWeight: '700', color: isDark ? '#FFF' : '#181445', marginTop: 4 }}>{nextExam.name}</Text>
           <Text style={{ fontSize: 14, color: isDark ? 'rgba(255,255,255,0.75)' : '#92400E', marginTop: 4 }}>
-            {nextExam.days === 0 ? 'Today — stay calm and trust your revision.' : `${nextExam.days} day${nextExam.days === 1 ? '' : 's'} left — bias time toward weak chapters.`}
+            {nextExam.days === 0 ? tr('exam_today') : `${nextExam.days} ${tr('exam_days_left')}`}
           </Text>
         </View>
       ) : null}
@@ -257,19 +309,19 @@ export default function HomeScreen() {
       {/* Baseline — show only if not done, or done but not yet viewed */}
       {!hasBaseline && (
         <View style={{ padding: 20, margin: 16, backgroundColor: 'rgba(254,166,25,0.1)', borderRadius: 20, borderWidth: 1, borderColor: '#FEA619' }}>
-          <Text style={{ fontSize: 20, fontWeight: '700', color: '#B45309', marginBottom: 8 }}>Diagnostic recommended</Text>
-          <Text style={{ color: '#B45309', marginBottom: 20 }}>Complete the timed diagnostic so weak subjects and chapters sync to your AI coach.</Text>
+          <Text style={{ fontSize: 20, fontWeight: '700', color: '#B45309', marginBottom: 8 }}>{tr('diagnostic_recommended')}</Text>
+          <Text style={{ color: '#B45309', marginBottom: 20 }}>{tr('diagnostic_desc')}</Text>
           <TouchableOpacity style={{ backgroundColor: '#F59E0B', padding: 16, borderRadius: 12, alignItems: 'center' }} onPress={() => router.push('/screens/BaselineTestScreen')}>
-            <Text style={{ color: '#FFF', fontWeight: '700' }}>Take Baseline Test</Text>
+            <Text style={{ color: '#FFF', fontWeight: '700' }}>{tr('take_baseline')}</Text>
           </TouchableOpacity>
         </View>
       )}
       {hasBaseline && !baselineViewed && (
         <View style={{ padding: 20, margin: 16, backgroundColor: isDark ? '#05966915' : '#ECFDF5', borderRadius: 20, borderWidth: 1, borderColor: '#05966940' }}>
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#059669', marginBottom: 8 }}>Diagnostic Complete ✓</Text>
-          <Text style={{ color: isDark ? 'rgba(255,255,255,0.7)' : '#065F46', marginBottom: 16 }}>Your results are ready. View them to see your strengths and weaknesses.</Text>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: '#059669', marginBottom: 8 }}>{tr('diagnostic_complete')}</Text>
+          <Text style={{ color: isDark ? 'rgba(255,255,255,0.7)' : '#065F46', marginBottom: 16 }}>{tr('view_results')}</Text>
           <TouchableOpacity style={{ backgroundColor: '#059669', padding: 14, borderRadius: 12, alignItems: 'center' }} onPress={handleViewResults}>
-            <Text style={{ color: '#FFF', fontWeight: '700' }}>View Results</Text>
+            <Text style={{ color: '#FFF', fontWeight: '700' }}>{tr('view_results')}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -291,18 +343,19 @@ export default function HomeScreen() {
       <AdaptiveNudgeCard />
 
       {/* Feature Grid */}
-      <Text style={[st.sectionTitle, { color: colors.text, marginTop: 10 }]}>Explore Features</Text>
+      <Text style={[st.sectionTitle, { color: colors.text, marginTop: 10 }]}>{tr('explore_features')}</Text>
       <View style={st.actionGrid}>
         {FEATURES.map(action => (
           <TouchableOpacity
-            key={action.label}
-            style={[st.actionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            key={action.labelKey}
+            activeOpacity={0.78}
+            style={[st.actionCard, { backgroundColor: premium.glassBg, borderColor: premium.glassBorder }]}
             onPress={() => router.push(action.route as any)}
           >
             <View style={[st.actionIconWrap, { backgroundColor: action.color + '15' }]}>
               <Ionicons name={action.icon as any} size={24} color={action.color} />
             </View>
-            <Text style={[st.actionLabel, { color: colors.text }]}>{action.label}</Text>
+            <Text style={[st.actionLabel, { color: colors.text }]}>{tr(action.labelKey)}</Text>
           </TouchableOpacity>
         ))}
       </View>

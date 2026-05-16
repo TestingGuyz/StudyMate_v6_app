@@ -12,11 +12,11 @@ import {
   Alert,
   Animated,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useTheme, useAuth } from '../../lib/context';
-import { writeTransaction } from '../../lib/neo4j';
+import { useTheme, useAuth, useLanguage } from '../../lib/context';
+import { writeTransaction, readQuery } from '../../lib/neo4j';
 import { v4 as uuidv4 } from 'uuid';
 import { ScoreCircle } from '../../components/ScoreCircle';
 import { callGroq, parseGroqJSON } from '../../lib/groq';
@@ -50,7 +50,11 @@ interface AnswerRow {
 export default function BaselineTestScreen() {
   const { colors, isDark } = useTheme();
   const { studentId } = useAuth();
-  const params = require('expo-router').useLocalSearchParams<{ viewResults?: string }>();
+  const { language } = useLanguage();
+  const params = useLocalSearchParams<{ 
+    board?: string; classNum?: string; examId?: string;
+    viewResults?: string 
+  }>();
 
   const [phase, setPhase] = useState<Phase>(params.viewResults === 'true' ? 'loading' : 'pick');
   const [board, setBoard] = useState<'ICSE' | 'CBSE'>('ICSE');
@@ -126,7 +130,7 @@ export default function BaselineTestScreen() {
         }
       }
     })();
-  }, [studentId]);
+  }, [studentId, params.viewResults]);
 
   const boardSubjects = getSubjectsForBoard(board);
 
@@ -178,7 +182,8 @@ export default function BaselineTestScreen() {
       const styleHint = examProfile?.questionStylePrompt || '';
 
       const prompt = `You are an assessment designer for ${board} Class ${classNum}${examProfile ? ` preparing students for ${examProfile.examName}` : ''}.
-Create exactly ${totalQs} multiple-choice questions.
+Create exactly ${totalQs} multiple-choice questions. 
+CRITICAL: The questions, options, and explanations MUST be written in ${language}.
 ${subjectDistribution}
 Each question must use question_type one of: recall, conceptual, application — vary across the paper.
 
@@ -433,7 +438,7 @@ Return ONLY valid JSON array (no markdown):
           [
             {
               role: 'system',
-              content: `You are a coaching assistant. Using diagnostic MCQ results, name weak subjects/chapters AND weak question patterns (recall/conceptual/application) and tell the student how to rebalance study time. Max 120 words. Indian ${board} Class ${classNum}${examProfile ? ` (${examProfile.examName} prep)` : ''} context.`,
+              content: `You are a coaching assistant. Using diagnostic MCQ results, name weak subjects/chapters AND weak question patterns (recall/conceptual/application) and tell the student how to rebalance study time. Max 120 words. Language: ${language}. Indian ${board} Class ${classNum}${examProfile ? ` (${examProfile.examName} prep)` : ''} context.`,
             },
             {
               role: 'user',
@@ -451,7 +456,7 @@ Return ONLY valid JSON array (no markdown):
       await persistResults(qList, ans, selectedList, summary, weakSubjList, weakChapList, weakPatList, pStats);
       setPhase('done');
     },
-    [persistResults, selectedList, board, classNum, examProfile]
+    [persistResults, selectedList, board, classNum, examProfile, language]
   );
 
   const onPick = useCallback(
@@ -465,7 +470,13 @@ Return ONLY valid JSON array (no markdown):
       }
 
       const elapsed = Date.now() - questionStartMs.current;
-      const isCorrect = opt !== '' && opt === q.correct;
+      const checkCorrect = (option: string, correct: string) => {
+        if (!option || !correct) return false;
+        const clean = (s: string) => s.toLowerCase().replace(/^[a-d][\s).:-]+/, '').trim();
+        return clean(option) === clean(correct) || option === correct;
+      };
+
+      const isCorrect = opt !== '' && checkCorrect(opt, q.correct);
       const row: AnswerRow = { selected: opt, correct: isCorrect, time_ms: elapsed };
       answersRef.current[idx] = row;
 

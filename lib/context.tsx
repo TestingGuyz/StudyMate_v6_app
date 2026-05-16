@@ -1,6 +1,7 @@
 // Theme and Auth context providers
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
+import { isValidLanguage, SupportedLanguage } from '../constants/languages';
 import { useColorScheme, Platform } from 'react-native';
 import { Colors } from '../constants/colors';
 
@@ -139,7 +140,7 @@ export function useAuth() {
 
 // ── Language Context ──────────────────────────────
 
-export type SupportedLanguage = 'English' | 'Hindi' | 'Bengali' | 'Telugu' | 'Marathi' | 'Tamil' | 'Urdu';
+export type { SupportedLanguage } from '../constants/languages';
 
 interface LanguageContextType {
   language: SupportedLanguage;
@@ -155,15 +156,16 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<SupportedLanguage>('English');
 
   useEffect(() => {
+    const applySaved = (saved: string | null) => {
+      if (isValidLanguage(saved)) setLanguageState(saved);
+    };
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const saved = localStorage.getItem('app_language') as SupportedLanguage;
-      if (saved) setLanguageState(saved);
+      applySaved(localStorage.getItem('app_language'));
     } else {
       (async () => {
         try {
           const SecureStore = require('expo-secure-store');
-          const saved = await SecureStore.getItemAsync('app_language') as SupportedLanguage;
-          if (saved) setLanguageState(saved);
+          applySaved(await SecureStore.getItemAsync('app_language'));
         } catch {}
       })();
     }
@@ -183,8 +185,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const value = useMemo(() => ({ language, setLanguage }), [language]);
+
   return (
-    <LanguageContext.Provider value={{ language, setLanguage }}>
+    <LanguageContext.Provider value={value}>
       {children}
     </LanguageContext.Provider>
   );

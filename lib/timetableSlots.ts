@@ -2,6 +2,7 @@ import { readQuery, writeQuery, writeTransaction } from './neo4j';
 import { callGroq, parseGroqJSON } from './groq';
 import { v4 as uuidv4 } from 'uuid';
 import { weekKeyFromDate } from './weekUtils';
+import { progressMission } from './missions';
 
 export interface TimetableSlotRow {
   id: string;
@@ -197,6 +198,11 @@ export async function setSlotDone(
          slot.completed_at = CASE WHEN $done THEN datetime() ELSE NULL END`,
     { studentId, slotId, done }
   );
+
+  if (done) {
+    // Fire gamification trigger asynchronously
+    progressMission(studentId, 'study_slot', 1).catch(err => console.error('Gamification hook failed:', err));
+  }
 }
 
 export async function updateSlotNote(

@@ -7,7 +7,10 @@ import {
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useTheme, useAuth, useLanguage, SupportedLanguage } from '../../lib/context';
+import { useTheme, useAuth, useLanguage } from '../../lib/context';
+import { useT } from '../../lib/translations';
+import { SUPPORTED_LANGUAGES } from '../../constants/languages';
+import { usePremium } from '../../components/ui/premium';
 import { getStudentProfile, StudentProfile } from '../../lib/adaptiveEngine';
 import { setStoredValue, testConnection, writeQuery, getStoredValue, readQuery, deleteStudentCascade } from '../../lib/neo4j';
 import { hashPassword, verifyPassword } from '../../lib/password';
@@ -16,6 +19,8 @@ export default function ProfileScreen() {
   const { colors, mode, setMode, isDark } = useTheme();
   const { studentId, setStudentId } = useAuth();
   const { language, setLanguage } = useLanguage();
+  const tr = useT();
+  const premium = usePremium();
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [neo4jConnected, setNeo4jConnected] = useState(false);
@@ -215,7 +220,7 @@ export default function ProfileScreen() {
         <View style={[s.avatar, { backgroundColor: isDark ? 'rgba(196,193,251,0.12)' : 'rgba(7,2,53,0.06)' }]}>
           <Text style={[s.avatarText, { color: colors.primary }]}>{profile?.name?.[0]?.toUpperCase() || '?'}</Text>
         </View>
-        <Text style={[s.heroName, { color: isDark ? '#FFF' : '#070235' }]}>{profile?.name || 'Student'}</Text>
+        <Text style={[s.heroName, { color: isDark ? '#FFF' : '#070235' }]}>{profile?.name || tr('student')}</Text>
         <Text style={[s.heroSub, { color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(7,2,53,0.5)' }]}>
           {profile?.email ? `${profile.email} · ` : ''}Class {profile?.class} · {profile?.board}
         </Text>
@@ -243,13 +248,17 @@ export default function ProfileScreen() {
         </View>
 
         {/* Appearance */}
-        <SectionHeader title="APPEARANCE" />
-        <View style={[s.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <SectionHeader title={tr('appearance').toUpperCase()} />
+        <View style={[s.card, { backgroundColor: premium.glassBg, borderColor: premium.glassBorder }]}>
           <View style={s.themeRow}>
-            {(['light', 'dark', 'system'] as const).map(m => (
+            {([
+              { m: 'light' as const, key: 'theme_light', icon: 'sunny' as const },
+              { m: 'dark' as const, key: 'theme_dark', icon: 'moon' as const },
+              { m: 'system' as const, key: 'theme_system', icon: 'phone-portrait-outline' as const },
+            ]).map(({ m, key, icon }) => (
               <TouchableOpacity key={m} style={[s.themePill, { backgroundColor: mode === m ? colors.primary : colors.surfaceContainer }]} onPress={() => setMode(m)}>
-                <Ionicons name={m === 'light' ? 'sunny' : m === 'dark' ? 'moon' : 'phone-portrait-outline'} size={16} color={mode === m ? colors.onPrimary : colors.textSecondary} />
-                <Text style={[s.themeText, { color: mode === m ? colors.onPrimary : colors.text }]}>{m.charAt(0).toUpperCase() + m.slice(1)}</Text>
+                <Ionicons name={icon} size={16} color={mode === m ? colors.onPrimary : colors.textSecondary} />
+                <Text style={[s.themeText, { color: mode === m ? colors.onPrimary : colors.text }]}>{tr(key)}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -259,11 +268,11 @@ export default function ProfileScreen() {
               <View style={[s.settingIcon, { backgroundColor: isDark ? 'rgba(196,193,251,0.08)' : '#EEF2FF' }]}>
                 <Ionicons name="language-outline" size={18} color={colors.primary} />
               </View>
-              <Text style={[s.settingLabel, { color: colors.text }]}>Language</Text>
+              <Text style={[s.settingLabel, { color: colors.text }]}>{tr('language')}</Text>
             </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-            {(['English', 'Hindi', 'Bengali', 'Telugu', 'Marathi', 'Tamil', 'Urdu'] as SupportedLanguage[]).map(lang => (
+            {SUPPORTED_LANGUAGES.map(lang => (
               <TouchableOpacity key={lang} style={[s.themePill, { backgroundColor: language === lang ? colors.primary : colors.surfaceContainer, marginRight: 8 }]} onPress={() => setLanguage(lang)}>
                 <Text style={[s.themeText, { color: language === lang ? colors.onPrimary : colors.text }]}>{lang}</Text>
               </TouchableOpacity>
@@ -272,20 +281,20 @@ export default function ProfileScreen() {
         </View>
 
         {/* Diagnostics */}
-        <SectionHeader title="DIAGNOSTICS" />
-        <View style={[s.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <SectionHeader title={tr('diagnostics').toUpperCase()} />
+        <View style={[s.card, { backgroundColor: premium.glassBg, borderColor: premium.glassBorder }]}>
           {hasBaseline ? (
             <>
-              <SettingRow icon="checkmark-circle-outline" label="Retake Diagnostic" onPress={() => router.push('/screens/BaselineTestScreen')}
+              <SettingRow icon="checkmark-circle-outline" label={tr('retake_diagnostic')} onPress={() => router.push('/screens/BaselineTestScreen')}
                 trailing={lastDiagScore ? <View style={{ backgroundColor: isDark ? '#05966920' : '#ECFDF5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}><Text style={{ fontSize: 12, fontWeight: '700', color: '#059669' }}>{lastDiagScore}</Text></View> : undefined}
               />
             </>
           ) : (
-            <SettingRow icon="clipboard-outline" label="Take Baseline Test" onPress={() => router.push('/screens/BaselineTestScreen')}
-              trailing={<View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}><Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>NEW</Text></View>}
+            <SettingRow icon="clipboard-outline" label={tr('take_baseline')} onPress={() => router.push('/screens/BaselineTestScreen')}
+              trailing={<View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}><Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>{tr('new')}</Text></View>}
             />
           )}
-          <SettingRow icon="document-text-outline" label="Parental Report Card" onPress={() => router.push('/screens/ParentalReportScreen')} />
+          <SettingRow icon="document-text-outline" label={tr('parental_report')} onPress={() => router.push('/screens/ParentalReportScreen')} />
         </View>
 
         {/* Parent PIN */}

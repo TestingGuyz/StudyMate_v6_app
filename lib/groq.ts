@@ -4,7 +4,10 @@
 import { Platform } from 'react-native';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
+/** Vision-capable model — required for image inputs (focus timer, grader, etc.) */
+const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 
 // Token limits per use case
 export const TOKEN_LIMITS = {
@@ -23,6 +26,7 @@ export const TOKEN_LIMITS = {
   voice_mode: 800,
   slot_extractor: 2500,
   wellness_insight: 600,
+  focus_check: 60, // minimal — just needs "FOCUSED" or "DISTRACTED"
 } as const;
 
 // Temperature per use case
@@ -37,35 +41,51 @@ export const TEMPERATURES = {
 
 export type GroqUseCase = keyof typeof TOKEN_LIMITS;
 
-async function getApiConfig(): Promise<{ key: string, url: string, model: string }> {
-  let groqKey, orKey, customModel;
+export type ApiConfig = { key: string; url: string; model: string };
+
+async function loadApiKeys(): Promise<{ groqKey?: string; orKey?: string; customModel?: string }> {
+  let groqKey: string | undefined;
+  let orKey: string | undefined;
+  let customModel: string | undefined;
 
   if (Platform.OS === 'web') {
-    groqKey = localStorage.getItem('groq_api_key');
-    orKey = localStorage.getItem('openrouter_api_key');
-    customModel = localStorage.getItem('custom_model');
+    groqKey = localStorage.getItem('groq_api_key') || undefined;
+    orKey = localStorage.getItem('openrouter_api_key') || undefined;
+    customModel = localStorage.getItem('custom_model') || undefined;
   } else {
     try {
       const SecureStore = require('expo-secure-store');
-      groqKey = await SecureStore.getItemAsync('groq_api_key');
-      orKey = await SecureStore.getItemAsync('openrouter_api_key');
-      customModel = await SecureStore.getItemAsync('custom_model');
+      groqKey = (await SecureStore.getItemAsync('groq_api_key')) || undefined;
+      orKey = (await SecureStore.getItemAsync('openrouter_api_key')) || undefined;
+      customModel = (await SecureStore.getItemAsync('custom_model')) || undefined;
     } catch {
       // Fallback
     }
   }
 
-  // Fallback to env
   if (!groqKey) groqKey = process.env.EXPO_PUBLIC_GROQ_API_KEY;
   if (!orKey) orKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
+
+  return { groqKey, orKey, customModel };
+}
+
+/** Returns true if any AI API key is available (Groq or OpenRouter). */
+export async function hasAiApiKey(): Promise<boolean> {
+  const { groqKey, orKey } = await loadApiKeys();
+  return !!(groqKey || orKey);
+}
+
+async function getApiConfig(): Promise<ApiConfig> {
+  const { groqKey, orKey, customModel } = await loadApiKeys();
 
   if (orKey) {
     return {
       key: orKey,
-      url: 'https://openrouter.ai/api/v1/chat/completions',
+      url: OPENROUTER_API_URL,
       model: customModel || 'meta-llama/llama-3.1-8b-instruct:free',
     };
-  } else if (groqKey) {
+  }
+  if (groqKey) {
     return {
       key: groqKey,
       url: GROQ_API_URL,
@@ -74,6 +94,28 @@ async function getApiConfig(): Promise<{ key: string, url: string, model: string
   }
 
   throw new Error('API key not configured. Add Groq or OpenRouter key in Settings.');
+}
+
+/**
+ * Vision requests must use a multimodal model. Prefer Groq scout even when OpenRouter is set for text.
+ */
+async function getVisionApiConfig(): Promise<ApiConfig> {
+  const { groqKey, orKey, customModel } = await loadApiKeys();
+
+  if (groqKey) {
+    return { key: groqKey, url: GROQ_API_URL, model: VISION_MODEL };
+  }
+  if (orKey) {
+    return {
+      key: orKey,
+      url: OPENROUTER_API_URL,
+      model: customModel?.includes('scout') || customModel?.includes('vision')
+        ? customModel
+        : VISION_MODEL,
+    };
+  }
+
+  throw new Error('API key not configured. Add Groq API key in Settings for focus detection.');
 }
 
 export interface GroqMessage {
@@ -102,9 +144,10 @@ export interface GroqResponse {
 export async function callGroq(
   messages: GroqMessage[],
   useCase: GroqUseCase,
-  temperature?: number
+  temperature?: number,
+  configOverride?: ApiConfig
 ): Promise<string> {
-  const config = await getApiConfig();
+  const config = configOverride ?? await getApiConfig();
   const maxTokens = TOKEN_LIMITS[useCase];
   const temp = temperature ?? getTemperatureForUseCase(useCase);
 
@@ -192,12 +235,21 @@ export async function callGroq(
 /**
  * Call Groq with vision (image) support
  */
+/** Strip data-URI prefix if present */
+export function normalizeImageBase64(raw: string): string {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^data:image\/[a-z+]+;base64,(.+)$/i);
+  return match ? match[1] : trimmed;
+}
+
 export async function callGroqVision(
   systemPrompt: string,
   imageBase64: string,
   textPrompt: string,
   useCase: GroqUseCase
 ): Promise<string> {
+  const config = await getVisionApiConfig();
+  const cleanB64 = normalizeImageBase64(imageBase64);
   const messages: GroqMessage[] = [
     { role: 'system', content: systemPrompt },
     {
@@ -206,7 +258,7 @@ export async function callGroqVision(
         {
           type: 'image_url',
           image_url: {
-            url: `data:image/jpeg;base64,${imageBase64}`,
+            url: `data:image/jpeg;base64,${cleanB64}`,
           },
         },
         {
@@ -217,7 +269,7 @@ export async function callGroqVision(
     },
   ];
 
-  return callGroq(messages, useCase);
+  return callGroq(messages, useCase, getTemperatureForUseCase(useCase), config);
 }
 
 /**
@@ -277,6 +329,8 @@ function getTemperatureForUseCase(useCase: GroqUseCase): number {
       return TEMPERATURES.nudge;
     case 'vision_question':
       return TEMPERATURES.doubt_solver;
+    case 'focus_check':
+      return 0.1;
     default:
       return 0.4;
   }
